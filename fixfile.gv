@@ -1,0 +1,25 @@
+#!/usr/bin/env groovy 
+
+import durbin.util.*
+
+/*
+platform_termpairs_smaples.tab
+
+sampleid	termpair	datasetid	samples	dirname	platform	channels
+GSM42867	Control=control_substance	GSE2299	14	2005_GSE2299	GPL97	1
+GSM42875	Control=control_substance	GSE2299	14	2005_GSE2299	GPL97	1
+GSM42870	Control=control_substance	GSE2299	14	2005_GSE2299	GPL97	1
+
+current file has this mistake:
+
+GSM42868	Control=control_substance	2005_GSE2299	14	2005_GSE2299	GPL97	1
+*/
+
+ot = new OnlineTable(args[0])
+println ot.headings().join("\t")
+
+ot.eachRow{row->
+	parts = row.datasetid.split("_")
+	newID = parts[1]
+	println "${row.sampleid}\t${row.termpair}\t${newID}\t${row.samples}\t${row.dirname}\t${row.platform}\t${row.channels}"
+}

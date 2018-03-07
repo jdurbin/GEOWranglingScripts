@@ -1,0 +1,35 @@
+#!/usr/bin/env groovy
+
+
+// Use like:
+// 
+// listPlatforms.gv all.lst > platforms.txt
+//
+// Searches .soft file for platform, number of channels, and series type description.
+
+err = System.err
+
+new File(args[0]).eachLine{dirName->
+    fields = dirName.split("_")
+    GSEName = fields[1]
+    softName ="${dirName}/${GSEName}_family.soft"
+    err.println "Searching $softName..."
+    def platform,channels,seriestype
+    new File(softName).withReader{r->
+        r.eachLine{line->
+           if (line.contains("PLATFORM")) {
+                platform = line.split("=")[1].trim()
+           }
+           if (line.contains("Sample_channel_count")) {
+                channels = line.split("=")[1].trim()
+           }
+           if (line.contains("Series_type")) {
+                seriestype = line.split("=")[1].trim()
+           }
+        }
+    }
+    err.println "done."            
+    println "$GSEName\t$platform\t$channels\t$seriestype"  
+}
+
+

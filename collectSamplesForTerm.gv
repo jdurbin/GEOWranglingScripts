@@ -1,0 +1,164 @@
+#!/usr/bin/env groovy
+
+import durbin.util.*
+import com.google.common.collect.*
+
+err = System.err
+
+options = ParseOptions(args)
+
+/*
+platform_termpairs_smaples.tab
+
+sampleid	termpair	datasetid	samples	dirname	platform	channels
+GSM42867	Control=control_substance	GSE2299	14	2005_GSE2299	GPL97	1
+GSM42875	Control=control_substance	GSE2299	14	2005_GSE2299	GPL97	1
+GSM42870	Control=control_substance	GSE2299	14	2005_GSE2299	GPL97	1
+
+current file has this mistake:
+
+GSM42868	Control=control_substance	2005_GSE2299	14	2005_GSE2299	GPL97	1
+GSM42877	Control=control_substance	2005_GSE2299	14	2005_GSE2299	GPL97	1
+GSM42874	Control=control_substance	2005_GSE2299	14	2005_GSE2299	GPL97	1
+GSM42872	Control=control_substance	2005_GSE2299	14	2005_GSE2299	GPL97	1
+GSM42865	Control=control_substance	2005_GSE2299	14	2005_GSE2299	GPL97	1
+GSM42867	Control=Scientific_Control	2005_GSE2299	14	2005_GSE2299	GPL97	1
+GSM42875	Control=Scientific_Control	2005_GSE2299	14	2005_GSE2299	GPL97	1
+GSM42870	Control=Scientific_Control	2005_GSE2299	14	2005_GSE2299	GPL97	1
+GSM42868	Control=Scientific_Control	2005_GSE2299	14	2005_GSE2299	GPL97	1
+GSM42877	Control=Scientific_Control	2005_GSE2299	14	2005_GSE2299	GPL97	1
+GSM42874	Control=Scientific_Control	2005_GSE2299	14	2005_GSE2299	GPL97	1
+
+*/
+sampleIDs = []
+dirnames = [] as Set
+sampleID2Row = [:]
+allFile2Sample = new ArrayListMultimap()
+
+// Takes about 40s to build a map by reading in the 7.845 million lines. 
+// Grep takes 15s to pipe results to stream.  So grep it 
+// grep  adenovirus platform_termpairs_samples.tab
+err.print "grep ${options.keyword} ${options.termMap}..."
+instream = "grep ${options.keyword} ${options.termMap}".execute().getIn()
+
+// Get the headings separately because the grep stream won't have them...
+headings = OnlineTable.getHeader(options.termMap) as ArrayList
+new OnlineTable(instream,headings,"\t").eachRow{row->
+
+	// I'm only interested in single channel data.  
+	if ((row.channels as Integer)> 1) return;
+
+	sampleIDs << row.sampleid
+	dirnames << row.dirname
+	sampleID2Row[row.sampleid] = row
+	allFile2Sample.put(row.dirname,row.sampleid)
+}
+err.println "done."
+err.println "${sampleIDs.size()} samples across ${dirnames.size()} directories found."
+
+//dirnames = dirnames.findAll{it == "Keats2012_GSE36824"}
+fileNamesList = dirnames.collect{"../data/$it/exp_norm/data.tab"}
+
+// Remove duplicate file names.
+fileNamesSet = [] as Set 
+fileNamesSet.addAll(fileNamesList)
+
+//err.println "FileNames: "+fileNamesSet
+
+tu = new TableUtils()
+(combinedRowNames,combinedColNames) = tu.unionTableIDs(fileNamesSet)
+combinedColNames = combinedColNames as ArrayList // convert from set to list
+
+def usedColNames
+if (options.numSamples){
+    usedColNames = chooseN(options.numSamples,combinedColNames,allFile2Sample) 
+}
+
+// Choose a subset of combinedColNames to include in this set... 
+// combinedColNames = chooseRandomSubset()
+// combinedColNames = chooseStratifiedSubset() // Stratify across experiments
+
+combinedTable = tu.combineTables(fileNamesSet,combinedRowNames,usedColNames)
+
+err.println "Writing table to ${options.outFile} ..."
+combinedTable.write(options.outFile,"\t")	
+
+
+/***
+* Pick a subset of column names. 
+*/ 
+def chooseN(n,colNames,allFile2Sample){        
+	// add samples from each file in turn until you reach the number of desired 
+	// samples.
+	//useFile2Sample = new ArrayListMultimap() 
+	newColSet = [] as Set
+	files = allFile2Sample.keySet()	
+	totalSamples =0;
+	while(totalSamples < n){
+		removelist = []
+		fileList = [] // Make separate list to avoid concurrent modification
+		fileList.addAll(files);
+		for (file in fileList){
+			//err.println "each file $file"
+			samples = allFile2Sample.get(file)
+			
+			// If any samples remaining for that file... add it...
+			if (samples.size() > 0){	
+				newColSet << samples[0]		
+				removelist<<[file,samples[0]]
+				totalSamples++
+				//err.println "totalSamples=$totalSamples  newColSet.size=${newColSet.size()}  newCol: ${samples[0]}"				
+			}
+			if (totalSamples >= n) {
+				//err.println "BREAK"
+				break; 
+			}else{
+					//err.println "continue"				
+			}
+		}
+		//err.println "out of file loop (either break or all files)"
+		removelist.each{pair->
+			//err.println "remove: ${pair[0]},${pair[1]}"
+			allFile2Sample.remove(pair[0],pair[1]) // Remove this one from list. 
+			//err.println "allFile2Sample ${pair[0]} now = ${allFile2Sample.get(pair[0])}"
+		}
+		//err.println "ABOUT TO END WHILE"
+	}	
+	//err.println "totalSamples= $totalSamples"
+	//err.println "newColSet.size() = "+newColSet.size()
+	return(newColSet)
+}
+
+
+/****************************************************
+* Parse the command line options, checking validity, printing help if needed. 
+*/ 
+def ParseOptions(args){
+	parser = new Parser(description: '''	
+	Extract samples matching the given keyword and put them in a file. 
+
+	''');
+
+	parser.with{
+		required 'o','outFile',[description: 'Name of file for combined output.']
+		required 't','termMap',[description: 'File to map terms.']
+		optional 'v','defaultValue',[description: 'Value to use for cells that do not appear in input.']
+        optional 'n','numSamples',[description: 'Number of samples desired.  Will return n or largest number available.',validate:{it as Integer}]
+	  	flag 'h','help',[default:false,description: 'Print script help.']
+		remainder{
+			if(!it) throw new IllegalArgumentException("Must specify a list of files");
+			it
+		}
+	}
+	try{ 
+		options = parser.parse(args); 
+		options.keyword = parser.remainder[0]
+	}catch(Exception e){
+		System.err.println "Exception :"+e
+		System.err << parser.usage;
+		System.exit(1)}		
+	return(options)
+}
+
+
+

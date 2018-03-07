@@ -1,0 +1,160 @@
+#!/usr/bin/env groovy
+
+import durbin.util.*
+import com.google.common.collect.*
+import cern.jet.random.sampling.RandomSampler
+import cern.jet.random.engine.MersenneTwister
+
+rnd = new Random()
+err = System.err
+
+options = ParseOptions(args)
+
+/***
+platform_termpairs_smaples.tab
+
+sampleid	termpair	datasetid	samples	dirname	platform	channels
+GSM42867	Control=control_substance	GSE2299	14	2005_GSE2299	GPL97	1
+GSM42875	Control=control_substance	GSE2299	14	2005_GSE2299	GPL97	1
+GSM42870	Control=control_substance	GSE2299	14	2005_GSE2299	GPL97	1
+
+current file has this mistake (dirname listed instead of datasetid):
+
+GSM42868	Control=control_substance	2005_GSE2299	14	2005_GSE2299	GPL97	1
+GSM42877	Control=control_substance	2005_GSE2299	14	2005_GSE2299	GPL97	1
+GSM42874	Control=control_substance	2005_GSE2299	14	2005_GSE2299	GPL97	1
+*/
+
+
+allSample2DirNames = grepTable(options.keyword,options.termMap)
+
+(randomSamples,randomSamplesDirnames) = chooseRandomN(options.numSamples,allSample2DirNames)
+
+err.println "${randomSamples.size()} random samples chosen from ${randomSamplesDirnames.size()} files."
+
+// randomSamplesDirnames is already a set so already unique
+// normed_flatfile.tab
+if (options.raw){
+    err.println "Using probe- "
+    fileNamesList = randomSamplesDirnames.collect{"../data/$it/normed_flatfile.tab"}
+}else{
+    fileNamesList = randomSamplesDirnames.collect{"../data/$it/exp_norm/data.tab"}
+}
+
+// TODO: Create a master gene set so that everything can just be slotted in...
+// in the mean time, scan all of the input files to determine the union row names. 
+
+//println "fileNamesList.size= ${fileNamesList.size()}"
+//println fileNamesList
+tu = new TableUtils()
+(combinedRowNames,combinedColNames) = tu.unionTableIDs(fileNamesList)
+
+err.print "\nCombine columns from files..."
+
+// Make a combined table from all the columns (randomSamples) chosen.  
+combinedTable = tu.combineTables(fileNamesList,combinedRowNames,randomSamples)
+err.println "done."
+
+err.println "\nWriting table to ${options.outFile} ..."
+combinedTable.write(options.outFile,"\t")	
+
+
+/***
+* Get random samples and the files that go with them. 
+*/ 
+def chooseRandomN(n,samples2File){
+	allSampleNames = samples2File.keySet()
+	
+	// Pick n random samples. 
+	randomSampleNames = randomSubset(allSampleNames as ArrayList,n)
+	
+	//println randomSampleNames
+	
+	fileSet = [] as Set
+	randomSampleNames.each{sampleName->
+		fileSet << samples2File[sampleName]
+	}
+	
+	//println "\n\n"+fileSet
+	
+	return([randomSampleNames,fileSet])
+}
+
+
+/***
+* Returns a random subset of the names in allSampleNames
+*/ 
+def randomSubset(allSampleNames,n){	
+	values = new long[n]
+	RandomSampler.sample(n,allSampleNames.size(),n,0,values,0, 
+		new MersenneTwister((int)System.currentTimeMillis()));
+	
+	outlist = []
+	values.each{i->
+		outlist<<allSampleNames[(int)i]
+	}
+	return(outlist)
+}
+
+
+/**
+* Extracts the subset of the samples table spcified by the keyword. 
+* So you can extract only Mucosa samples, or all GSM samples, or whatever. 
+*/ 
+def grepTable(keyword,termMap){
+	
+	allSample2DirNames = [:]
+		
+	// Takes about 40s to build a map by reading in the 7.845 million lines. 
+	// Grep takes 15s to pipe results to stream.  So grep it 
+	// grep  adenovirus platform_termpairs_samples.tab
+	err.print "grep ${options.keyword} ${options.termMap}..."
+	instream = "grep ${options.keyword} ${options.termMap}".execute().getIn()
+
+	// Get the headings separately because the grep stream won't have them...
+	headings = OnlineTable.getHeader(options.termMap) as ArrayList
+	dirnames = [] as Set
+	new OnlineTable(instream,headings,"\t").eachRow{row->
+		// I'm only interested in single channel data.  
+		if ((row.channels as Integer)> 1) return;
+		allSample2DirNames[row.sampleid] = row.dirname
+		dirnames << row.dirname
+	}
+	err.println "done."
+	err.println "${allSample2DirNames.keySet().size()} samples across ${dirnames.size()} directories found."
+	return(allSample2DirNames);
+}
+
+/****************************************************
+* Parse the command line options, checking validity, printing help if needed. 
+*/ 
+def ParseOptions(args){
+	parser = new Parser(description: '''	
+	Extract samples matching the given keyword and put them in a file. 
+
+	''');
+
+	parser.with{
+		required 'o','outFile',[description: 'Name of file for combined output.']
+		required 't','termMap',[description: 'File to map terms.']
+		optional 'v','defaultValue',[description: 'Value to use for cells that do not appear in input.']
+        optional 'n','numSamples',[description: 'Number of samples desired.  Will return n or largest number available.',validate:{it as Integer}]
+                flag 'r','raw',[default:false,description: 'Use raw, probe-normed, data instead of exponentially normalized data. (Default uses expnorm)']
+	  	flag 'h','help',[default:false,description: 'Print script help.']
+		remainder{
+			if(!it) throw new IllegalArgumentException("Must specify a list of files");
+			it
+		}
+	}
+	try{ 
+		options = parser.parse(args); 
+		options.keyword = parser.remainder[0]
+	}catch(Exception e){
+		System.err.println "Exception :"+e
+		System.err << parser.usage;
+		System.exit(1)}		
+	return(options)
+}
+
+
+

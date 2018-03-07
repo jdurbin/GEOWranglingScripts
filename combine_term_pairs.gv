@@ -1,0 +1,57 @@
+#!/usr/bin/env groovy 
+
+import durbin.util.*
+
+/* 
+platform_samples.tab: 
+
+GSEAID	DirectoryName	NumSamples	Platform	NumChannels	Description
+GSE26459	Zou2011_GSE26459	24	GPL570	1	Expression profiling by array
+GSE17347	Zschenker2009_GSE17347	12	GPL570	1	Expression profiling by array
+GSE14560	Zucchetto2009_GSE14560	26	GPL4133	2	Expression profiling by array
+GSE27629	Zwang2011_GSE27629	17	GPL6244	1	Expression profiling by array
+
+termpairs.tab 
+sampleid	termpair	datasetid
+GSM42867	Control=control_substance	2005_GSE2299
+GSM42875	Control=control_substance	2005_GSE2299
+GSM42870	Control=control_substance	2005_GSE2299
+GSM42868	Control=control_substance	2005_GSE2299
+GSM42877	Control=control_substance	2005_GSE2299
+GSM42874	Control=control_substance	2005_GSE2299
+GSM42872	Control=control_substance	2005_GSE2299
+GSM42865	Control=control_substance	2005_GSE2299
+GSM42867	Control=Scientific_Control	2005_GSE2299
+
+Output:
+
+platform_termpair_samples
+
+sampleid        termpair        datasetid       samples  dirname   platform channels
+GSM42867        Control=control_substance       2005_GSE2299  24 Zou2011_GSE26549 GPL570 1
+
+*/
+
+// Save the platform data in a ID keyed map..
+System.err.print "Reading platform samples..."
+gse2Data = [:]
+new OnlineTable(args[0]).eachRow{row->
+    if (row == null) return;
+    gse2Data[row.GSEAID] = row
+}
+System.err.println "done."
+
+println "sampleid\ttermpair\tdatasetid\tsamples\tdirname\tplatform\tchannels"
+new OnlineTable(args[1]).eachRow{row->
+    datasetid = row.datasetid
+    gseaID = datasetid.split("_")[1]
+    gseaID = gseaID.trim()
+    rowdata = gse2Data[gseaID]
+    if (rowdata == null){
+        System.err.println "Null data for $gseID"
+        return;
+    }
+    println "${row.sampleid}\t${row.termpair}\t${row.datasetid}\t${rowdata.NumSamples}\t${rowdata.DirectoryName}\t${rowdata.Platform}\t${rowdata.NumChannels}"
+}
+
+

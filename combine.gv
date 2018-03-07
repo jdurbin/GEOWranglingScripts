@@ -1,0 +1,59 @@
+#!/usr/bin/env groovy 
+
+// Combine platforms. 
+
+// data.psycic.num.samples.tab
+// Abbas2010_GSE22886 228
+
+// all_platforms.lst
+// GSE10172	GPL96	1	Expression profiling by array
+
+err = System.err
+
+
+samplesFile = "data.psychic.num.samples.tab"
+platformsFile = "all_platforms.lst"
+
+// Build a map of the GSEAID to sample count...
+err.print "Building sample count map..."
+ID2Samples = [:]
+ID2FullName = [:]
+new File(samplesFile).withReader{r->
+    heading = r.readLine();
+    r.splitEachLine("\t"){fields->
+
+        if (fields.size() < 2){
+            err.println "ERROR: less than two fields in : "+fields.join(",")
+        }
+
+        fullName = fields[0]
+        nameFields = fullName.split("_")
+        if (nameFields.size() < 2){
+            err.println "ERROR: nameFields < 2 in  "+fullName
+        }
+        GSEAName = fullName.split("_")[1]
+        sampleCount = fields[1] as int
+        ID2Samples[GSEAName] = sampleCount 
+        ID2FullName[GSEAName] = fullName
+    }
+}
+err.println "done."
+
+println "GSEAID\tDirectoryName\tNumSamples\tPlatform\tNumChannels\tDescription"
+new File(platformsFile).splitEachLine("\t"){fields->
+    GSEAID = fields[0]
+    platform = fields[1]
+    channels = fields[2]
+    desc = fields[3]
+    numSamples = ID2Samples[GSEAID]
+    if (numSamples == null) {
+        err.println "ERROR: Missing samples for $GSEAID"
+        return;
+    }
+    dirName = ID2FullName[GSEAID]
+    if (dirName == null){
+        err.println "ERROR: Missing dirName for $GSEAID"
+        return;
+    }
+    println "$GSEAID\t$dirName\t$numSamples\t$platform\t$channels\t$desc"
+}

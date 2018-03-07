@@ -1,0 +1,22 @@
+#!/usr/bin/env groovy
+
+import durbin.util.*
+
+// GSEAID	DirectoryName	NumSamples	Platform	NumChannels	Description
+
+
+// Total number of single channel samples: 138176
+// Total number of dual channel samples: 5298
+// Total: 143474
+
+totalSingle = 0;
+totalDual = 0
+new OnlineTable(args[0]).eachRow{row->
+        numChannels = row.NumChannels as int
+        numSamples = row.NumSamples as int
+	if (numChannels == 2) totalDual+= numSamples
+	if (numChannels == 1) totalSingle+= numSamples
+}
+
+println "Total number of single channel samples: $totalSingle"
+println "Total number of dual channel samples: $totalDual"

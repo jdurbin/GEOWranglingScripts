@@ -1,0 +1,31 @@
+#!/usr/bin/env groovy
+
+import durbin.util.*
+
+/*
+termpairs.tab 
+sampleid	termpair	datasetid
+GSM42867	Control=control_substance	2005_GSE2299
+GSM42875	Control=control_substance	2005_GSE2299
+GSM42870	Control=control_substance	2005_GSE2299
+*/
+
+// count the occurrences of each term...
+System.err.print "Counting terms..."
+term2Counts = new CounterMap();
+new OnlineTable(args[0]).eachRow{row->
+    term2Counts.inc(row.termpair)
+}
+System.err.println "done."
+
+// Sort the map by term count...
+System.err.print "Sorting..."
+sortedCounts = term2Counts.sort{ -(it.value as int) }
+System.err.println "done."
+
+System.err.print "Writing out counts.."
+println "termpair\tnumsamples"
+sortedCounts.each{k,v->
+    println "$k\t$v"
+}
+System.err.println "done."
